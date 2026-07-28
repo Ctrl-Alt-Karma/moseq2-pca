@@ -98,6 +98,32 @@ def compute_explained_variance(s, nsamples, total_var):
 
     return explained_variance, explained_variance_ratio
 
+def _fps_from_timestamps(timestamps, default_fps=30):
+    """
+    Recover the frame rate from a timestamp series, falling back when degenerate.
+
+    A single-frame session gives an empty diff (mean = NaN) and constant
+    timestamps give a mean diff of 0; both make 1/mean inf or NaN, and casting
+    that to int yields a garbage frame rate that then corrupts NaN insertion.
+
+    Args:
+    timestamps (numpy.array): timestamps in seconds.
+    default_fps (int): frame rate to fall back on.
+
+    Returns:
+    fps (int): estimated frames per second.
+    """
+
+    if timestamps is None or len(timestamps) < 2:
+        return int(default_fps)
+
+    mean_diff = np.mean(np.diff(timestamps))
+    if not np.isfinite(mean_diff) or mean_diff <= 0:
+        return int(default_fps)
+
+    return int(np.round(1 / mean_diff))
+
+
 def get_timestamps(f, frames, fps=30):
     """
     Read the timestamps from a given h5 file.
@@ -322,7 +348,7 @@ def apply_pca_local(pca_components, h5s, yamls, use_fft, clean_params,
 
             # Insert NaNs into scores array
             scores, score_idx, _ = insert_nans(data=scores, timestamps=timestamps,
-                                               fps=np.round(1 / np.mean(np.diff(timestamps))).astype('int'))
+                                               fps=_fps_from_timestamps(timestamps, fps))
 
             # Write scores
             f_scores.create_dataset(f'scores/{uuid}', data=scores,
@@ -383,7 +409,8 @@ def apply_pca_dask(pca_components, h5s, yamls, use_fft, clean_params,
         # Apply filters
         if clean_params['gaussfilter_time'] > 0 or np.any(np.array(clean_params['medfilter_time']) > 0):
             frames = frames.map_overlap(
-                clean_frames, depth=(20, 0, 0), boundary='reflect', dtype='float32', **clean_params)
+                clean_frames, depth=(int(np.minimum(np.min(frames.chunks[0]), 20)), 0, 0),
+                boundary='reflect', dtype='float32', **clean_params)
         else:
             frames = frames.map_blocks(clean_frames, dtype='float32', **clean_params)
 
@@ -430,13 +457,17 @@ def apply_pca_dask(pca_components, h5s, yamls, use_fft, clean_params,
                 file_idx = keys.index(future.key)
 
                 with h5py.File(h5s_batch[file_idx], mode='r') as f:
-                    # Load timestamps
-                    timestamps = get_timestamps(f, frames, fps)
+                    # Load timestamps. `result` is this session's scores; the
+                    # loop variable `frames` still held the LAST session's array,
+                    # so when a session had no stored timestamps the fallback
+                    # built them from the wrong frame count and misaligned the
+                    # scores for that session.
+                    timestamps = get_timestamps(f, result, fps)
                     copy_metadatas_to_scores(f, f_scores, uuids_batch[file_idx])
 
                 # Insert NaNs in missing frames in scores array
                 scores, score_idx, _ = insert_nans(data=result, timestamps=timestamps,
-                                                   fps=np.round(1 / np.mean(np.diff(timestamps))).astype('int'))
+                                                   fps=_fps_from_timestamps(timestamps, fps))
 
                 # Write scores
                 f_scores.create_dataset(f'scores/{uuids_batch[file_idx]}', data=scores,

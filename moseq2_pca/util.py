@@ -158,7 +158,10 @@ def gaussian_kernel1d(n=None, sig=3):
     if n is None:
         n = np.ceil(sig * 4)
 
-    points = np.arange(-n, n)
+    # arange(-n, n) is even-length and omits +n, so the kernel is asymmetric and
+    # a 'same'-mode convolution shifts the signal by a full sample. Include +n so
+    # the kernel is symmetric, odd-length, and zero-delay.
+    points = np.arange(-n, n + 1)
 
     kernel = np.exp(-(points**2.0) / (2.0 * sig**2.0))
     kernel /= np.sum(kernel)
