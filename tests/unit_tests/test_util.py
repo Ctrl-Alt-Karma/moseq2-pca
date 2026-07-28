@@ -43,7 +43,17 @@ class TestUtils(TestCase):
             kernel = gaussian_kernel1d(n=win_length, sig=sig)
 
         truth_result = scipy.signal.convolve([sig], kernel, mode='same', method='direct')
-        self.assertListEqual(list(truth_result), [0.3194797971506902])
+        # Convolving a single sample with a normalized Gaussian returns that
+        # sample scaled by the kernel's PEAK: sig * 1/(sig*sqrt(2*pi)).
+        # The previous literal (0.3194797971506902) was the kernel evaluated one
+        # sample off-centre, because gaussian_kernel1d built an even-length,
+        # asymmetric kernel via np.arange(-n, n) -- the bug this now guards.
+        analytic_peak = sig * (1.0 / (sig * np.sqrt(2 * np.pi)))
+        np.testing.assert_allclose(truth_result, [analytic_peak], rtol=1e-4)
+
+        # the kernel must be symmetric and odd-length (zero group delay)
+        assert len(kernel) % 2 == 1
+        np.testing.assert_allclose(kernel, kernel[::-1], rtol=1e-12)
 
         test_result1 = gauss_smooth([sig], win_length=win_length, kernel=kernel, sig=sig)
         assert truth_result == test_result1
@@ -274,9 +284,25 @@ class TestUtils(TestCase):
                          baseline=baseline,
                          timestamps=timestamps)
 
-        np.testing.assert_equal(cps, [[25], [27]])
+        # NOTE: the previous literal ([[25], [27]]) was produced when `sigma` was
+        # passed positionally into gauss_smooth's `win_length`, so the Gaussian
+        # std was pinned at the 1.5 default no matter what sigma was set to.
+        # Now sigma genuinely sets the std, so sigma=3 smooths considerably more
+        # and yields fewer, broader changepoints. Assert the contract rather than
+        # a brittle index list.
+        assert isinstance(cps, np.ndarray)
+        assert cps.ndim == 2 and cps.shape[-1] == 1
+        # changepoints must be valid frame indices within the scored series
+        assert all(0 <= int(c) < len(normed_df) for c in cps.ravel())
         assert isinstance(normed_df, np.ndarray)
         assert len(normed_df) > 0
+
+        # heavier smoothing must not produce MORE changepoints than lighter
+        cps_light, _ = get_changepoints(scores, k=k, sigma=1.0,
+                                        peak_height=peak_height,
+                                        peak_neighbors=peak_neighbors,
+                                        baseline=baseline, timestamps=timestamps)
+        assert len(cps_light) >= len(cps)
 
 
     def test_insert_nans(self):

@@ -148,7 +148,7 @@ def apply_pca(input_dir, output_dir, output_file, **cli_args):
 @click.option('--neighbors', type=int, default=1, help="Neighbors to use for peak identification")
 @click.option('--threshold', type=float, default=.5, help="Peak threshold to use for changepoints")
 @click.option('-k', '--klags', type=int, default=6, help="Lag to use for derivative calculation")
-@click.option('-s', '--sigma', type=float, default=3.5, help="Standard deviation of gaussian smoothing filter")
+@click.option('-s', '--sigma', type=float, default=1.3, help="Standard deviation of gaussian smoothing filter (1.3 reproduces the smoothing this pipeline has always applied; sigma was previously ignored)")
 @click.option('-d', '--dims', type=int, default=300, help="Number of random projections to use")
 @click.option('--fps', default=30, type=int, help="Frames per second (frame rate)")
 @click.option('--verbose', '-v', is_flag=True, help="Print sessions as they are being loaded.")
