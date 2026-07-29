@@ -106,6 +106,11 @@ def _fps_from_timestamps(timestamps, default_fps=30):
     timestamps give a mean diff of 0; both make 1/mean inf or NaN, and casting
     that to int yields a garbage frame rate that then corrupts NaN insertion.
 
+    Uses the MEDIAN inter-frame interval, not the mean. Dropped frames enlarge
+    the mean interval, which would lower the estimated fps, which would make the
+    gap look less anomalous to insert_nans -- a dropped frame that partly hides
+    itself. The median is unaffected by a minority of long (dropped) gaps.
+
     Args:
     timestamps (numpy.array): timestamps in seconds.
     default_fps (int): frame rate to fall back on.
@@ -117,11 +122,16 @@ def _fps_from_timestamps(timestamps, default_fps=30):
     if timestamps is None or len(timestamps) < 2:
         return int(default_fps)
 
-    mean_diff = np.mean(np.diff(timestamps))
-    if not np.isfinite(mean_diff) or mean_diff <= 0:
+    diffs = np.diff(timestamps)
+    diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+    if diffs.size == 0:
         return int(default_fps)
 
-    return int(np.round(1 / mean_diff))
+    period = np.median(diffs)
+    if not np.isfinite(period) or period <= 0:
+        return int(default_fps)
+
+    return int(np.round(1 / period))
 
 
 def get_timestamps(f, frames, fps=30):

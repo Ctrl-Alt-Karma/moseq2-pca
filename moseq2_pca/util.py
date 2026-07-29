@@ -638,13 +638,18 @@ def get_changepoints(scores, k=5, sigma=1.3, peak_height=.5, peak_neighbors=1,
     scores (numpy.ndarray): nframes * rows * columns
     k (int): klags - Lag to use for derivative calculation.
     sigma (float): Standard deviation of the gaussian smoothing filter.
-        The default is 1.3 rather than 3 because sigma used to be passed into
-        gauss_smooth's `win_length` slot, which pinned the actual std at the 1.5
-        default and truncated the kernel, giving an effective std of ~1.3. Now
-        that sigma genuinely sets the std, 1.3 reproduces the smoothing this
-        pipeline has always applied (measured: 39 changepoints either way on the
-        bundled test scores), whereas the old nominal defaults of 3 and 3.5 would
-        now over-smooth to 4 and 0 changepoints respectively.
+        The default is 1.3 rather than 3. Historically sigma was passed into
+        gauss_smooth's `win_length` slot, so the actual std stayed at the 1.5
+        default and the truncated kernel had an effective std of ~1.3. Now that
+        sigma genuinely sets the std, 1.3 is chosen to APPROXIMATELY PRESERVE THE
+        CHANGEPOINT CADENCE that historical runs produced (39 changepoints vs 39
+        on the bundled test scores), whereas the old nominal defaults of 3 and
+        3.5 now over-smooth to 4 and 0 changepoints. This is a cadence match, not
+        an identical smoothing transform: the historical kernel was asymmetric
+        with two central taps, so the exact smoothed curve differs (max ~0.07 on
+        a unit impulse). Do not compare changepoint distributions across this
+        change without regenerating them, and prefer recording the kernel version
+        and sigma alongside the changepoint output.
     peak_height (float): user-defined peak Changepoint length.
     peak_neighbors (int): number of peaks in the CP curve.
     baseline (bool): normalize data.
@@ -665,7 +670,8 @@ def get_changepoints(scores, k=5, sigma=1.3, peak_height=.5, peak_neighbors=1,
     nanidx = np.isnan(normed_df)
     normed_df[nanidx] = 0
 
-    if sigma is not None and sigma > 0:
+    smoothing = sigma is not None and sigma > 0
+    if smoothing:
         for i in range(scores.shape[0]):
             # pass sigma as the kernel std (sig=), not as the window length; the
             # edge masking below (6 * sigma) already assumes sigma is the std
@@ -674,8 +680,15 @@ def get_changepoints(scores, k=5, sigma=1.3, peak_height=.5, peak_neighbors=1,
     normed_df[:, k // 2:-k // 2] = (normed_df[:, k:] - normed_df[:, :-k])**2
 
     normed_df[nanidx] = np.nan
-    normed_df[:, :int(6 * sigma)] = np.nan
-    normed_df[:, -int(6 * sigma):] = np.nan
+    # Only mask the smoothing-contaminated edges when smoothing was applied. With
+    # sigma=0, int(6*0)=0 and the slice [:, -0:] is [:, 0:], which wiped the whole
+    # trace to NaN; with sigma=None the multiplication raised. No smoothing means
+    # no smoothing edge mask.
+    if smoothing:
+        edge = int(np.ceil(6 * sigma))
+        if edge > 0:
+            normed_df[:, :edge] = np.nan
+            normed_df[:, -edge:] = np.nan
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
