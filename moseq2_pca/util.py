@@ -7,10 +7,12 @@ import cv2
 import h5py
 import time
 import dask
+import json
 import click
 import psutil
 import warnings
 import platform
+import datetime
 import subprocess
 import numpy as np
 import scipy.stats
@@ -26,6 +28,76 @@ from os.path import join, exists, abspath, expanduser
 
 # from https://stackoverflow.com/questions/46358797/
 # python-click-supply-arguments-and-options-from-a-configuration-file
+# Semantic version tags for the behaviours whose OUTPUT changed relative to the
+# upstream 2021 code. Bump the relevant tag whenever a change alters the numbers
+# written to disk, so a file records which policy produced it.
+PCA_OUTPUT_POLICIES = {
+    "gaussian_kernel": "symmetric-odd",      # was even-length, +1 frame delay
+    "changepoint_sigma_arg": "std",          # sigma was passed as window length
+    "changepoint_edge_mask": "conditional",  # sigma=0 no longer wipes the trace
+    "fps_estimator": "median-interval",      # was mean, hid dropped frames
+    "whitening": "train-only",               # held-out no longer leaks in
+}
+
+
+def _package_git_sha(package_file):
+    """Best-effort git commit of an installed package (editable installs)."""
+    try:
+        pkg_dir = os.path.dirname(os.path.abspath(package_file))
+        return (
+            subprocess.check_output(
+                ["git", "-C", pkg_dir, "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
+    except Exception:
+        return "unknown"
+
+
+def get_pipeline_provenance():
+    """
+    Build a provenance record describing the code that produced a PCA output.
+
+    Returns:
+    provenance (dict): package version, git commit (best effort), write time and
+        the semantic output-policy tags in PCA_OUTPUT_POLICIES.
+    """
+
+    try:
+        from moseq2_pca import __version__ as version
+    except Exception:
+        version = "unknown"
+
+    return {
+        "package": "moseq2-pca",
+        "version": version,
+        "git_sha": _package_git_sha(__file__),
+        "written": datetime.datetime.now().isoformat(),
+        "policies": dict(PCA_OUTPUT_POLICIES),
+    }
+
+
+def write_pipeline_provenance(h5_file, path="metadata/pipeline"):
+    """
+    Write the provenance record as a JSON string dataset into an open h5 file.
+
+    Args:
+    h5_file (h5py.File): open, writable h5 file.
+    path (str): dataset path to write the JSON provenance to.
+    """
+
+    provenance = json.dumps(get_pipeline_provenance())
+    if path in h5_file:
+        del h5_file[path]
+    h5_file.create_dataset(path, data=np.string_(provenance))
+    h5_file[path].attrs["description"] = (
+        "JSON provenance: pipeline version, git commit and output-policy tags "
+        "identifying the code that produced this file"
+    )
+
+
 def command_with_config(config_file_param_name):
     """
     Helper function to assign variables from a config file. 
