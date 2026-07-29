@@ -17,7 +17,7 @@ from os.path import abspath, join, exists, splitext, basename, dirname
 from moseq2_pca.helpers.data import get_pca_paths, get_pca_yaml_data, load_pcs_for_cp
 from moseq2_pca.pca.util import apply_pca_dask, apply_pca_local, train_pca_dask, get_changepoints_dask
 from moseq2_pca.util import recursive_find_h5s, select_strel, initialize_dask, set_dask_config, close_dask, \
-            h5_to_dict, check_timestamps
+            h5_to_dict, check_timestamps, write_pipeline_provenance
 
 def load_and_check_data(input_dir, output_dir, config_data):
     """
@@ -189,6 +189,7 @@ def train_pca_wrapper(input_dir, config_data, output_dir, output_file):
         with h5py.File(f'{save_file}.h5', 'w') as f:
             for k, v in output_dict.items():
                 f.create_dataset(k, data=v, compression='gzip', dtype='float32')
+            write_pipeline_provenance(f)
 
         config_data['pca_file'] = f'{save_file}.h5'
     except:

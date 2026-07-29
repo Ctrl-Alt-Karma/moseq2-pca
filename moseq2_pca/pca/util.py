@@ -11,7 +11,8 @@ import dask.array as da
 from tqdm.auto import tqdm
 import dask.array.linalg as lng
 from dask.distributed import as_completed, progress
-from moseq2_pca.util import (clean_frames, insert_nans, read_yaml, get_changepoints, get_rps)
+from moseq2_pca.util import (clean_frames, insert_nans, read_yaml, get_changepoints, get_rps,
+                             write_pipeline_provenance)
 
 
 def mask_data(original_data, mask, new_data):
@@ -310,6 +311,7 @@ def apply_pca_local(pca_components, h5s, yamls, use_fft, clean_params,
     """
 
     with h5py.File(f'{save_file}.h5', 'w') as f_scores:
+        write_pipeline_provenance(f_scores)
         for h5, yml in tqdm(zip(h5s, yamls), total=len(h5s), desc='Computing scores'):
             # Load the file's metadata
             data = read_yaml(yml)
@@ -451,6 +453,7 @@ def apply_pca_dask(pca_components, h5s, yamls, use_fft, clean_params,
     batch_size = len(client.scheduler_info()['workers'])
 
     with h5py.File(f'{save_file}.h5', 'w') as f_scores:
+        write_pipeline_provenance(f_scores)
 
         batch_count = 0
         batches = range(0, len(futures), batch_size)
@@ -582,6 +585,7 @@ def get_changepoints_dask(changepoint_params, pca_components, h5s, yamls,
     batch_size = len(client.scheduler_info()['workers'])
 
     with h5py.File(f'{save_file}.h5', 'w') as f_cps:
+        write_pipeline_provenance(f_cps)
         f_cps.create_dataset('metadata/fps', data=fps, dtype='float32')
 
         batch_count = 0
